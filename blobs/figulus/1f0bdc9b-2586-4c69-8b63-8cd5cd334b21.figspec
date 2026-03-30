@@ -1,0 +1,19 @@
+{
+  // Minimal smoke test — echo a greeting from an Alpine container.
+  // Expected: prints "Hello from Figulus!" and exits 0.
+  "schemaVersion": "1.0",
+  "specName": "hello",
+
+  "build": {
+    "schemaVersion": "1.0",
+    "baseImage": "alpine:3.21"
+  },
+
+  "run": {
+    "execute": {
+      "main": {
+        "cmd": "echo 'Hello from Figulus (Spec v2)!'"
+      }
+    }
+  }
+}
