@@ -3,5 +3,23 @@
   "description": "A simple 'Hello, World' FigSpec to test that Figulus is working correctly",
   "author": "The Figulus Project",
   "license": "MIT",
-  "variants": []
+  "variants": [
+    {
+      "blob": {
+        "uuid": "c31d58f2-8b98-452f-8206-44a9548ba909",
+        "contentHash": "1791801d45ffa5b9cd5883879fc6741d3a5186ed9429f59e401fecc86f6a447a",
+      },
+      "createdAt": "2026-03-30T14:57:22.000Z",
+      "updatedAt": "2026-03-30T14:57:22.000Z"
+    },
+    {
+      "blob": {
+        "uuid": "1f0bdc9b-2586-4c69-8b63-8cd5cd334b21",
+        "contentHash": "02cd65e7f73d29d49aee987741ddce31e969857c491aaf9050857bcfc76b173a",
+      },
+      "createdAt": "2026-03-30T14:59:35.870Z",
+      "updatedAt": "2026-03-30T14:59:35.870Z",
+      "tag": "v2"
+    }
+  ]
 }
