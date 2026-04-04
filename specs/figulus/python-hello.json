@@ -1,0 +1,20 @@
+{
+  "title": "Python Hello",
+  "description": "A minimal spec that prints a greeting with the Python version and exits 0 — use this to verify your Figulus installation is working correctly",
+  "author": [
+    {
+      "type": "fig-author",
+      "name": "The Figulus Project",
+      "url": "https://figulus.net"
+    }
+  ],
+  "license": "MIT",
+  "variants": [
+    {
+      "blob": {
+        "contentHash": "47fbf77fbf181de5686423f23e2a2544a6c98d8293c474b6f611d5e02b077517"
+      },
+      "tag": "v1"
+    }
+  ]
+}
