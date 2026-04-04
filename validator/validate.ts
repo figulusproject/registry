@@ -122,7 +122,7 @@ function validateMetadata(
 ): string[] {
   const result = schema.safeParse(data);
   if (!result.success) {
-    return result.error.errors.map((err) => {
+    return result.error.issues.map((err) => {
       const path = err.path.length > 0 ? err.path.join(".") : "root";
       return `${path}: ${err.message}`;
     });
