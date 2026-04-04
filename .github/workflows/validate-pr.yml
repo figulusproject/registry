@@ -59,7 +59,7 @@ jobs:
         continue-on-error: true
 
       - name: Post validation results
-        if: failure()
+        if: steps.validator.outcome == 'failure'
         uses: actions/github-script@v7
         with:
           script: |
