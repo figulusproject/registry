@@ -1,0 +1,39 @@
+{
+  // nginx persistent session with a custom HTML page baked into the image at build time.
+  //
+  // Demonstrates: new-file build volume injection and port exposure.
+  //
+  // Workflow:
+  //   figulus start  examples/nginx.figspec   → prints session ID
+  //   curl http://localhost:8080/             → serves the custom page
+  //   figulus stop   <session-id>
+  "schemaVersion": "1.0",
+  "specName": "nginx",
+
+  "build": {
+    "schemaVersion": "1.0",
+    "baseImage": "nginx:alpine",
+    "volumes": [
+      {
+        // new-file: write content directly into the image layer (replaces the default nginx page)
+        "type": "new-file",
+        "container_path": "/usr/share/nginx/html/index.html",
+        "content": {
+          "data": "<!DOCTYPE html><html><body><h1>Hello from Figulus!</h1><p>Custom page injected at build time.</p></body></html>"
+        }
+      }
+    ]
+  },
+
+  "run": {
+    "ports": [
+      { "container": 80, "host": 8080 }
+    ],
+    "execute": {
+      "main": {
+        "cmd": "nginx -g 'daemon off;'",
+        "onExit": "persist"
+      }
+    }
+  }
+}

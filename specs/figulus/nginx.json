@@ -1,0 +1,26 @@
+{
+  "title": "Nginx",
+  "description": "High-performance HTTP server and reverse proxy",
+  "author": [
+    {
+      "type": "software-author",
+      "name": "Nginx, Inc.",
+      "url": "https://nginx.org"
+    },
+    {
+      "type": "fig-author",
+      "name": "The Figulus Project",
+      "url": "https://figulus.net"
+    }
+  ],
+  "license": "BSD-2-Clause",
+  "softwareSource": "https://nginx.org",
+  "variants": [
+    {
+      "blob": {
+        "contentHash": "796257ba4c6552a2869a18114a493c053fa940136aff28fe4dda790cce42599b"
+      },
+      "tag": "v1"
+    }
+  ]
+}

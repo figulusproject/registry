@@ -1,0 +1,26 @@
+{
+  "title": "PostgreSQL",
+  "description": "PostgreSQL relational database",
+  "author": [
+    {
+      "type": "software-author",
+      "name": "PostgreSQL Global Development Group",
+      "url": "https://postgresql.org"
+    },
+    {
+      "type": "fig-author",
+      "name": "The Figulus Project",
+      "url": "https://figulus.net"
+    }
+  ],
+  "license": "PostgreSQL",
+  "softwareSource": "https://postgresql.org",
+  "variants": [
+    {
+      "blob": {
+        "contentHash": "6bd95ad4215c27ab74bccfef19a7395df4af2184122bea63e38a8e49217cb25a"
+      },
+      "tag": "v1"
+    }
+  ]
+}

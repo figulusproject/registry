@@ -1,0 +1,20 @@
+{
+  "title": "Hello World",
+  "description": "A minimal spec that prints a greeting — use this to verify your Figulus installation is working correctly",
+  "author": [
+    {
+      "type": "fig-author",
+      "name": "The Figulus Project",
+      "url": "https://figulus.net"
+    }
+  ],
+  "license": "MIT",
+  "variants": [
+    {
+      "blob": {
+        "contentHash": "a6a9a544a01ef6334cdf43a7b0f9097d16baca2c39b12c6a5d7a49653cd33ade"
+      },
+      "tag": "v1"
+    }
+  ]
+}

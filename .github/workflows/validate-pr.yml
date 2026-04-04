@@ -1,0 +1,96 @@
+name: Validate Registry PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            specs/**
+            stacks/**
+            parsers/**
+            blobs/**
+            namespaces/**
+
+      - name: Validate namespace ownership
+        id: namespace-check
+        run: |
+          # Check if any files are being modified in the figulus/ namespace
+          FIGULUS_FILES=$(echo "${{ steps.changed-files.outputs.all_changed_files }}" | tr ' ' '\n' | grep -E "^(specs|stacks|parsers|blobs|namespaces)/figulus/" || true)
+
+          if [ -n "$FIGULUS_FILES" ]; then
+            # Only allow modifications from figulusproject organization members
+            ALLOWED_USERS="figulusproject"
+            if [[ ! "$ALLOWED_USERS" =~ "${{ github.actor }}" ]]; then
+              echo "ERROR: Only figulusproject organization members can modify the figulus/ namespace"
+              exit 1
+            fi
+          fi
+
+      - name: Install validator dependencies
+        run: npm ci
+        working-directory: validator
+
+      - name: Run validator
+        id: validator
+        run: |
+          npx tsx validator/validate.ts --changed-files "${{ steps.changed-files.outputs.all_changed_files }}"
+        continue-on-error: true
+
+      - name: Post validation results
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const changedFiles = '${{ steps.changed-files.outputs.all_changed_files }}'.split(/\s+/).filter(f => f.length > 0);
+
+            let comment = '## ❌ Registry Validation Failed\n\n';
+            comment += 'Please review and fix the following validation errors:\n\n';
+            comment += '```\n';
+            comment += 'Run the validator locally to see detailed errors:\n';
+            comment += 'cd validator && npm ci && npx tsx validate.ts --changed-files "' + changedFiles.join(' ') + '"\n';
+            comment += '```\n\n';
+            comment += '### What was validated:\n';
+            comment += '- ✓ JSON syntax and structure\n';
+            comment += '- ✓ Metadata fields (title, description, author, license, etc.)\n';
+            comment += '- ✓ Blob file hash verification (filename must match SHA-256 of content)\n';
+            comment += '- ✓ Namespace ownership (PR author must be listed as editor)\n';
+            comment += '- ✓ SPDX license ID validity\n\n';
+            comment += '### Common issues:\n';
+            comment += '- Missing required fields like `description` or `author`\n';
+            comment += '- Blob filename hash doesn\'t match file content\n';
+            comment += '- Not listed as editor for namespace changes\n';
+            comment += '- Invalid SPDX license ID\n';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if validation failed
+        if: steps.validator.outcome == 'failure'
+        run: exit 1

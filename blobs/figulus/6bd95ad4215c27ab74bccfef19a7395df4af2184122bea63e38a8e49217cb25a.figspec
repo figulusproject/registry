@@ -1,0 +1,43 @@
+{
+  // Postgres persistent session — data survives stop/start via a named volume.
+  //
+  // Workflow:
+  //   figulus start  examples/postgres.figspec   → prints session ID
+  //   figulus exec   <session-id> -- psql -U app -d appdb
+  //   figulus stop   <session-id>                → container stops; data is preserved in pgdata volume
+  //   figulus start  examples/postgres.figspec   → new session, same data
+  //
+  // To wipe the database: docker volume rm pgdata
+  "schemaVersion": "1.0",
+  "specName": "postgres",
+
+  "build": {
+    "schemaVersion": "1.0",
+    "baseImage": "postgres:16-alpine"
+  },
+
+  "run": {
+    "env": {
+      "POSTGRES_USER": "app",
+      "POSTGRES_DB": "appdb",
+      "POSTGRES_PASSWORD": "changeme",
+      "PGDATA": "/var/lib/postgresql/data"
+    },
+    "volumes": [
+      {
+        "type": "named",
+        "name": "pgdata",
+        "container_path": "/var/lib/postgresql/data"
+      }
+    ],
+    "ports": [
+      { "container": 5432, "host": 5432 }
+    ],
+    "execute": {
+      "main": {
+        "cmd": "docker-entrypoint.sh postgres",
+        "onExit": "persist"
+      }
+    }
+  }
+}

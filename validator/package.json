@@ -1,0 +1,14 @@
+{
+  "name": "registry-validator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate": "npx tsx validate.ts"
+  },
+  "dependencies": {
+    "@figulus/registry-schema": "^0.1.0",
+    "zod": "^4.3.6",
+    "strip-json-comments": "^5.0.1",
+    "tsx": "^4.0.0"
+  }
+}
