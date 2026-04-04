@@ -1,5 +1,5 @@
 {
-  "name": "registry-validator",
+  "name": "@figulus/registry-validator",
   "private": true,
   "type": "module",
   "scripts": {
