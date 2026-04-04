@@ -1,5 +1,6 @@
 {
   "title": "Python Hello",
+  "description": "A minimal spec that prints a greeting with the Python version and exits 0 — use this to verify your Figulus installation is working correctly",
   "author": [
     {
       "type": "fig-author",
