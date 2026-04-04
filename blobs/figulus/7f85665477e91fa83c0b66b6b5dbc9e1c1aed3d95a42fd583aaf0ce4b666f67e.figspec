@@ -1,0 +1,19 @@
+{
+  // Python smoke test — uses the official Python Alpine image (no package install needed).
+  // Expected: prints a greeting with the Python version and exits 0.
+  "schemaVersion": "1.0",
+  "specName": "python-hello",
+
+  "build": {
+    "schemaVersion": "1.0",
+    "baseImage": "python:3.13-alpine"
+  },
+
+  "run": {
+    "execute": {
+      "main": {
+        "cmd": "python3 -c \"import sys; print(f'Hello from Python {sys.version.split()[0]} on Figulus!')\""
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "title": "Python Hello",
+  "author": [
+    {
+      "type": "fig-author",
+      "name": "The Figulus Project",
+      "url": "https://figulus.net"
+    }
+  ],
+  "license": "MIT",
+  "variants": [
+    {
+      "blob": {
+        "contentHash": "7f85665477e91fa83c0b66b6b5dbc9e1c1aed3d95a42fd583aaf0ce4b666f67e"
+      },
+      "tag": "v1"
+    }
+  ]
+}
