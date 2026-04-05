@@ -1,0 +1,16 @@
+{
+  "author": "figulusproject",
+  "description": "Hello from Python",
+  "license": "MIT",
+  "title": "python-hello",
+  "variants": [
+    {
+      "blob": {
+        "contentHash": "47fbf77fbf181de5686423f23e2a2544a6c98d8293c474b6f611d5e02b077517"
+      },
+      "createdAt": "2026-04-05T07:50:30Z",
+      "tag": "latest",
+      "updatedAt": "2026-04-05T07:50:30Z"
+    }
+  ]
+}
