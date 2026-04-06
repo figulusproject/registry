@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve } from "path";
+import { execSync } from "child_process";
 import stripComments from "strip-json-comments";
 import {
   namespaceMetadataSchema,
@@ -24,6 +25,16 @@ interface FileValidationResult {
 }
 
 const validationErrors: ValidationError[] = [];
+
+/**
+ * Registry maintainers who can modify governance files and reserved namespaces
+ */
+const REGISTRY_MAINTAINERS = ["figulusproject"];
+
+/**
+ * Namespaces that cannot be claimed by regular users
+ */
+const RESTRICTED_NAMESPACES = ["verified", "push-limit-overrides", "official"];
 
 /**
  * Parse command line arguments
@@ -102,14 +113,49 @@ function parseJsonFile(filePath: string): any {
 }
 
 /**
- * Extract namespace from file path
+ * Validate blob references in spec/stack/parser metadata
  */
-function extractNamespace(filePath: string): string | null {
+function validateBlobReferences(
+  filePath: string,
+  data: any,
+  repoRoot: string,
+  extension: "figspec" | "figstack" | "js"
+): string[] {
+  const errors: string[] = [];
+
+  // Extract namespace from file path (e.g., "specs/myns/myspec.json" -> "myns")
   const parts = filePath.split("/");
-  if (parts.length >= 2) {
-    return parts[1];
+  if (parts.length < 2) {
+    return errors; // Invalid path, will be caught elsewhere
   }
-  return null;
+  const namespace = parts[1];
+
+  // Check variants array
+  const variants = data.variants || [];
+  if (!Array.isArray(variants)) {
+    return errors; // Not an array, will be caught by schema validation
+  }
+
+  for (const variant of variants) {
+    const blob = variant.blob || {};
+    const contentHash = blob.contentHash;
+
+    if (!contentHash) {
+      continue; // Will be caught by schema validation
+    }
+
+    const blobPath = `blobs/${namespace}/${contentHash}.${extension}`;
+    const fullBlobPath = resolve(repoRoot, blobPath);
+
+    // Check if blob file exists
+    if (!existsSync(fullBlobPath)) {
+      errors.push(
+        `Variant references blob ${contentHash} but blobs/${namespace}/${contentHash}.${extension} does not exist in the repository`
+      );
+    }
+  }
+
+  return errors;
 }
 
 /**
@@ -186,10 +232,28 @@ function validateBlob(
  * Validate a spec metadata file
  */
 function validateSpec(filePath: string, repoRoot: string): string[] {
+  const prAuthor = process.env.GITHUB_ACTOR || "";
+
+  // Check if trying to modify figulus/ namespace
+  if (filePath.startsWith("specs/figulus/")) {
+    if (!REGISTRY_MAINTAINERS.includes(prAuthor)) {
+      return [
+        "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
+      ];
+    }
+  }
+
   const fullPath = resolve(repoRoot, filePath);
   try {
     const data = parseJsonFile(fullPath);
-    return validateMetadata(filePath, data, figSpecMetadataSchema);
+    const errors = validateMetadata(filePath, data, figSpecMetadataSchema);
+    if (errors.length > 0) {
+      return errors;
+    }
+
+    // Validate blob references
+    const blobErrors = validateBlobReferences(filePath, data, repoRoot, "figspec");
+    return blobErrors;
   } catch (error) {
     return [
       `Failed to parse spec: ${error instanceof Error ? error.message : String(error)}`,
@@ -201,10 +265,28 @@ function validateSpec(filePath: string, repoRoot: string): string[] {
  * Validate a stack metadata file
  */
 function validateStack(filePath: string, repoRoot: string): string[] {
+  const prAuthor = process.env.GITHUB_ACTOR || "";
+
+  // Check if trying to modify figulus/ namespace
+  if (filePath.startsWith("stacks/figulus/")) {
+    if (!REGISTRY_MAINTAINERS.includes(prAuthor)) {
+      return [
+        "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
+      ];
+    }
+  }
+
   const fullPath = resolve(repoRoot, filePath);
   try {
     const data = parseJsonFile(fullPath);
-    return validateMetadata(filePath, data, figStackMetadataSchema);
+    const errors = validateMetadata(filePath, data, figStackMetadataSchema);
+    if (errors.length > 0) {
+      return errors;
+    }
+
+    // Validate blob references
+    const blobErrors = validateBlobReferences(filePath, data, repoRoot, "figstack");
+    return blobErrors;
   } catch (error) {
     return [
       `Failed to parse stack: ${error instanceof Error ? error.message : String(error)}`,
@@ -216,10 +298,28 @@ function validateStack(filePath: string, repoRoot: string): string[] {
  * Validate a parser metadata file
  */
 function validateParser(filePath: string, repoRoot: string): string[] {
+  const prAuthor = process.env.GITHUB_ACTOR || "";
+
+  // Check if trying to modify figulus/ namespace
+  if (filePath.startsWith("parsers/figulus/")) {
+    if (!REGISTRY_MAINTAINERS.includes(prAuthor)) {
+      return [
+        "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
+      ];
+    }
+  }
+
   const fullPath = resolve(repoRoot, filePath);
   try {
     const data = parseJsonFile(fullPath);
-    return validateMetadata(filePath, data, figParserMetadataSchema);
+    const errors = validateMetadata(filePath, data, figParserMetadataSchema);
+    if (errors.length > 0) {
+      return errors;
+    }
+
+    // Validate blob references
+    const blobErrors = validateBlobReferences(filePath, data, repoRoot, "js");
+    return blobErrors;
   } catch (error) {
     return [
       `Failed to parse parser: ${error instanceof Error ? error.message : String(error)}`,
@@ -237,6 +337,55 @@ function validateNamespaceMetadata(
   const fullPath = resolve(repoRoot, filePath);
   const prAuthor = process.env.GITHUB_ACTOR || "";
 
+  // Extract namespace name from path (e.g., "namespaces/myns.json" -> "myns")
+  const namespaceName = filePath.split("/")[1]?.replace(".json", "");
+
+  // Check if namespace name is restricted
+  if (namespaceName && RESTRICTED_NAMESPACES.includes(namespaceName)) {
+    return [
+      `Cannot create namespace "${namespaceName}": this name is reserved for the Figulus project`,
+    ];
+  }
+
+  // Check if trying to modify figulus namespace
+  if (namespaceName === "figulus") {
+    if (!REGISTRY_MAINTAINERS.includes(prAuthor)) {
+      return [
+        "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
+      ];
+    }
+  }
+
+  // Check if namespace already exists in HEAD
+  if (namespaceName) {
+    try {
+      const headContent = execSync(`git show HEAD:${filePath}`, {
+        cwd: repoRoot,
+        encoding: "utf-8",
+      });
+      // Namespace exists in HEAD - validate against HEAD version to prevent squatting
+      try {
+        const headData = JSON.parse(stripComments(headContent));
+        const headEditors = headData.editors || [];
+        const isEditorInHead = headEditors.some(
+          (e: any) => e.githubUsername === prAuthor
+        );
+        if (!isEditorInHead) {
+          return [
+            `PR author "${prAuthor}" is not listed as an editor in the existing namespace metadata`,
+          ];
+        }
+      } catch (parseError) {
+        return [
+          `Failed to parse HEAD version of namespace metadata: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+        ];
+      }
+    } catch (gitError) {
+      // File doesn't exist in HEAD - this is a new namespace claim
+      // Fall through to validate the new submission
+    }
+  }
+
   try {
     const data = parseJsonFile(fullPath);
     const errors = validateMetadata(
@@ -245,8 +394,9 @@ function validateNamespaceMetadata(
       namespaceMetadataSchema
     );
 
-    // If schema is valid, check that PR author is in editors
+    // If schema is valid and this is a new namespace, check that PR author is in editors
     if (errors.length === 0 && prAuthor) {
+      // We only reach here if the namespace doesn't exist in HEAD
       const editors = data.editors || [];
       const isEditor = editors.some(
         (e: any) => e.githubUsername === prAuthor
@@ -270,6 +420,15 @@ function validateNamespaceMetadata(
  * Validate verified namespaces file
  */
 function validateVerified(filePath: string, repoRoot: string): string[] {
+  const prAuthor = process.env.GITHUB_ACTOR || "";
+
+  // Only maintainers can modify verified.json
+  if (!REGISTRY_MAINTAINERS.includes(prAuthor)) {
+    return [
+      "Only repository maintainers can modify namespaces/verified.json",
+    ];
+  }
+
   const fullPath = resolve(repoRoot, filePath);
   try {
     const data = parseJsonFile(fullPath);
@@ -285,6 +444,15 @@ function validateVerified(filePath: string, repoRoot: string): string[] {
  * Validate push limit overrides file
  */
 function validateLimits(filePath: string, repoRoot: string): string[] {
+  const prAuthor = process.env.GITHUB_ACTOR || "";
+
+  // Only maintainers can modify push-limit-overrides.json
+  if (!REGISTRY_MAINTAINERS.includes(prAuthor)) {
+    return [
+      "Only repository maintainers can modify namespaces/push-limit-overrides.json",
+    ];
+  }
+
   const fullPath = resolve(repoRoot, filePath);
   try {
     const data = parseJsonFile(fullPath);
