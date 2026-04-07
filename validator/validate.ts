@@ -13,18 +13,11 @@ import {
 } from "@figulus/registry-schema";
 import { z } from "zod";
 
-interface ValidationError {
-  file: string;
-  errors: string[];
-}
-
 interface FileValidationResult {
   file: string;
   type: string;
   errors: string[];
 }
-
-const validationErrors: ValidationError[] = [];
 
 /**
  * Registry maintainers who can modify governance files and reserved namespaces
@@ -159,6 +152,173 @@ function validateBlobReferences(
 }
 
 /**
+ * Get namespace metadata from HEAD
+ */
+function getNamespaceMetadataFromHead(
+  namespace: string,
+  repoRoot: string
+): {
+  owner: { githubUsername: string };
+  editors: { githubUsername: string; pushLimit?: { unit: "daily" | "weekly"; value: number } }[];
+} | null {
+  try {
+    const filePath = `namespaces/${namespace}.json`;
+    const headContent = execSync(`git show HEAD:${filePath}`, {
+      cwd: repoRoot,
+      encoding: "utf-8",
+    });
+    const data = JSON.parse(stripComments(headContent));
+    const result = namespaceMetadataSchema.safeParse(data);
+    return result.success ? data : null;
+  } catch (error) {
+    // Namespace doesn't exist in HEAD or git failed
+    return null;
+  }
+}
+
+/**
+ * Get push limit overrides from HEAD
+ */
+function getPushLimitOverrides(
+  repoRoot: string
+): { namespace: string; pushLimit: { unit: "daily" | "weekly"; value: number } }[] {
+  try {
+    const filePath = "namespaces/push-limit-overrides.json";
+    const headContent = execSync(`git show HEAD:${filePath}`, {
+      cwd: repoRoot,
+      encoding: "utf-8",
+    });
+    const data = JSON.parse(stripComments(headContent));
+    const result = pushLimitOverridesSchema.safeParse(data);
+    return result.success ? data : [];
+  } catch (error) {
+    // File doesn't exist or git failed
+    return [];
+  }
+}
+
+/**
+ * Check if author has exceeded their push limit for a namespace
+ */
+function checkPushLimit(
+  prAuthor: string,
+  namespace: string,
+  repoRoot: string
+): string | null {
+  // Get namespace metadata
+  const namespaceMetadata = getNamespaceMetadataFromHead(namespace, repoRoot);
+  if (namespaceMetadata === null) {
+    // New namespace - no limit applicable yet
+    return null;
+  }
+
+  // Find editor entry for this author
+  const editorEntry = namespaceMetadata.editors.find(
+    (e) => e.githubUsername === prAuthor
+  );
+  if (!editorEntry) {
+    // Permission check in validateSpec/validateStack/validateParser will catch this
+    return null;
+  }
+
+  // Get per-editor push limit
+  let editorLimit = editorEntry.pushLimit || { unit: "daily" as const, value: 10 };
+
+  // Check for overrides
+  const overrides = getPushLimitOverrides(repoRoot);
+  const override = overrides.find((o) => o.namespace === namespace);
+
+  // Use Math.min if override exists
+  let effectiveLimit = editorLimit;
+  let limitSource = "editor settings";
+
+  if (override) {
+    const overrideValue = override.pushLimit.value;
+    const editorValue = editorLimit.value;
+
+    if (overrideValue < editorValue) {
+      effectiveLimit = override.pushLimit;
+      limitSource = "namespace override";
+    }
+  } else {
+    // No override - check if we should use default
+    if (!editorEntry.pushLimit) {
+      limitSource = "default (10/day)";
+    }
+  }
+
+  // Query GitHub API to count recent PRs
+  const githubToken = process.env.GITHUB_TOKEN;
+  if (!githubToken) {
+    // Can't check without token - skip validation
+    return null;
+  }
+
+  try {
+    // Calculate time window
+    const now = new Date();
+    let startDate: Date;
+
+    if (effectiveLimit.unit === "daily") {
+      startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    } else {
+      startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    }
+
+    // Build file path patterns for the namespace
+    const filePrefixes = [
+      `specs/${namespace}/`,
+      `stacks/${namespace}/`,
+      `parsers/${namespace}/`,
+      `blobs/${namespace}/`,
+    ];
+
+    // Query GitHub API
+    const response = execSync(
+      `curl -s -H "Authorization: Bearer ${githubToken}" "https://api.github.com/repos/figulusproject/registry/pulls?state=all&per_page=100"`,
+      { encoding: "utf-8" }
+    );
+
+    const prs = JSON.parse(response);
+
+    // Filter PRs by author, creation date, and affected files
+    let count = 0;
+    for (const pr of prs) {
+      if (pr.user.login !== prAuthor) continue;
+
+      const createdAt = new Date(pr.created_at);
+      if (createdAt < startDate) continue;
+
+      // Check if this PR touches any files in our namespace
+      // Get PR files using the GitHub API
+      const filesResponse = execSync(
+        `curl -s -H "Authorization: Bearer ${githubToken}" "${pr.url}/files?per_page=100"`,
+        { encoding: "utf-8" }
+      );
+
+      const files = JSON.parse(filesResponse);
+      const touchesNamespace = files.some((f: any) =>
+        filePrefixes.some((prefix) => f.filename.startsWith(prefix))
+      );
+
+      if (touchesNamespace) {
+        count++;
+      }
+    }
+
+    // Check if limit exceeded
+    if (count >= effectiveLimit.value) {
+      return `Push limit exceeded for namespace "${namespace}": ${count}/${effectiveLimit.value} ${effectiveLimit.unit} pushes used. Limit set by ${limitSource}.`;
+    }
+
+    return null;
+  } catch (error) {
+    // If GitHub API call fails, skip validation to not block PRs
+    return null;
+  }
+}
+
+/**
  * Validate a metadata file with Zod schema
  */
 function validateMetadata(
@@ -241,6 +401,32 @@ function validateSpec(filePath: string, repoRoot: string): string[] {
         "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
       ];
     }
+  } else {
+    // For non-figulus namespaces, check that PR author is a listed editor
+    const parts = filePath.split("/");
+    if (parts.length >= 2) {
+      const namespace = parts[1];
+      const namespaceMetadata = getNamespaceMetadataFromHead(namespace, repoRoot);
+      if (namespaceMetadata === null) {
+        return [
+          `Namespace "${namespace}" does not exist. Run \`figulus registry claim ${namespace}\` to claim it before publishing.`,
+        ];
+      }
+      const isEditor = namespaceMetadata.editors.some(
+        (e) => e.githubUsername === prAuthor
+      );
+      if (!isEditor) {
+        return [
+          `PR author "${prAuthor}" is not listed as an editor for namespace "${namespace}"`,
+        ];
+      }
+
+      // Check push limits
+      const pushLimitError = checkPushLimit(prAuthor, namespace, repoRoot);
+      if (pushLimitError) {
+        return [pushLimitError];
+      }
+    }
   }
 
   const fullPath = resolve(repoRoot, filePath);
@@ -274,6 +460,32 @@ function validateStack(filePath: string, repoRoot: string): string[] {
         "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
       ];
     }
+  } else {
+    // For non-figulus namespaces, check that PR author is a listed editor
+    const parts = filePath.split("/");
+    if (parts.length >= 2) {
+      const namespace = parts[1];
+      const namespaceMetadata = getNamespaceMetadataFromHead(namespace, repoRoot);
+      if (namespaceMetadata === null) {
+        return [
+          `Namespace "${namespace}" does not exist. Run \`figulus registry claim ${namespace}\` to claim it before publishing.`,
+        ];
+      }
+      const isEditor = namespaceMetadata.editors.some(
+        (e) => e.githubUsername === prAuthor
+      );
+      if (!isEditor) {
+        return [
+          `PR author "${prAuthor}" is not listed as an editor for namespace "${namespace}"`,
+        ];
+      }
+
+      // Check push limits
+      const pushLimitError = checkPushLimit(prAuthor, namespace, repoRoot);
+      if (pushLimitError) {
+        return [pushLimitError];
+      }
+    }
   }
 
   const fullPath = resolve(repoRoot, filePath);
@@ -306,6 +518,32 @@ function validateParser(filePath: string, repoRoot: string): string[] {
       return [
         "The figulus/ namespace is reserved for the official Figulus project. Changes require maintainer approval.",
       ];
+    }
+  } else {
+    // For non-figulus namespaces, check that PR author is a listed editor
+    const parts = filePath.split("/");
+    if (parts.length >= 2) {
+      const namespace = parts[1];
+      const namespaceMetadata = getNamespaceMetadataFromHead(namespace, repoRoot);
+      if (namespaceMetadata === null) {
+        return [
+          `Namespace "${namespace}" does not exist. Run \`figulus registry claim ${namespace}\` to claim it before publishing.`,
+        ];
+      }
+      const isEditor = namespaceMetadata.editors.some(
+        (e) => e.githubUsername === prAuthor
+      );
+      if (!isEditor) {
+        return [
+          `PR author "${prAuthor}" is not listed as an editor for namespace "${namespace}"`,
+        ];
+      }
+
+      // Check push limits
+      const pushLimitError = checkPushLimit(prAuthor, namespace, repoRoot);
+      if (pushLimitError) {
+        return [pushLimitError];
+      }
     }
   }
 
@@ -357,6 +595,7 @@ function validateNamespaceMetadata(
   }
 
   // Check if namespace already exists in HEAD
+  let headData: any = null;
   if (namespaceName) {
     try {
       const headContent = execSync(`git show HEAD:${filePath}`, {
@@ -365,7 +604,7 @@ function validateNamespaceMetadata(
       });
       // Namespace exists in HEAD - validate against HEAD version to prevent squatting
       try {
-        const headData = JSON.parse(stripComments(headContent));
+        headData = JSON.parse(stripComments(headContent));
         const headEditors = headData.editors || [];
         const isEditorInHead = headEditors.some(
           (e: any) => e.githubUsername === prAuthor
@@ -373,6 +612,40 @@ function validateNamespaceMetadata(
         if (!isEditorInHead) {
           return [
             `PR author "${prAuthor}" is not listed as an editor in the existing namespace metadata`,
+          ];
+        }
+
+        // Check that non-owners cannot change the owner field
+        try {
+          const submittedData = parseJsonFile(fullPath);
+          const headOwner = headData.owner?.githubUsername;
+          const submittedOwner = submittedData.owner?.githubUsername;
+
+          if (
+            submittedOwner !== headOwner &&
+            prAuthor !== headOwner
+          ) {
+            return [
+              `Only the namespace owner ("${headOwner}") can transfer ownership`,
+            ];
+          }
+        } catch (parseError) {
+          // Continue - this error will be caught again during full validation
+        }
+
+        // Namespace exists in HEAD and author is a valid editor with no ownership violations
+        // Validate the submitted file against the schema
+        try {
+          const data = parseJsonFile(fullPath);
+          const errors = validateMetadata(
+            filePath,
+            data,
+            namespaceMetadataSchema
+          );
+          return errors;
+        } catch (error) {
+          return [
+            `Failed to parse namespace metadata: ${error instanceof Error ? error.message : String(error)}`,
           ];
         }
       } catch (parseError) {
@@ -386,6 +659,7 @@ function validateNamespaceMetadata(
     }
   }
 
+  // If we reach here, the namespace doesn't exist in HEAD (new namespace claim)
   try {
     const data = parseJsonFile(fullPath);
     const errors = validateMetadata(
@@ -394,9 +668,8 @@ function validateNamespaceMetadata(
       namespaceMetadataSchema
     );
 
-    // If schema is valid and this is a new namespace, check that PR author is in editors
+    // For new namespaces, check that PR author is in editors
     if (errors.length === 0 && prAuthor) {
-      // We only reach here if the namespace doesn't exist in HEAD
       const editors = data.editors || [];
       const isEditor = editors.some(
         (e: any) => e.githubUsername === prAuthor
